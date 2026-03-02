@@ -1,0 +1,25 @@
+services:
+  drawio:
+    image: jgraph/drawio:latest
+    container_name: drawio
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      - DRAWIO_LICENSE=free
+
+  next-ai-draw-io:
+    image: next-ai-draw-io:latest
+    container_name: next-ai-draw-io
+    restart: unless-stopped
+    build:
+      context: .
+      args:
+        - NEXT_PUBLIC_DRAWIO_BASE_URL=http://localhost:8080
+    network_mode: host
+    environment:
+      - AI_PROVIDER=deepseek
+      - AI_MODEL=deepseek-chat
+      - DEEPSEEK_API_KEY=sk-0f707d47a3f9433a8cf3c326cec7c3f9
+      - TEMPERATURE=0
+    depends_on:
+      - drawio
