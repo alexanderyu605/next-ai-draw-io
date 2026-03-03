@@ -147,6 +147,8 @@ Download the native desktop app for your platform from the [Releases page](https
 
 Supported platforms: Windows, macOS, Linux.
 
+**Offline Mode**: The desktop app automatically bundles draw.io for complete offline functionality. When draw.io files are bundled, the app works entirely without internet connectivity.
+
 ### Run with Docker
 
 [Go to Docker Guide](./docs/en/docker.md)

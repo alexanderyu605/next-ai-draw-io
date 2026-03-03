@@ -6,20 +6,28 @@
  * that electron-builder can properly include
  */
 
+import { execFileSync } from "node:child_process"
 import {
     copyFileSync,
     existsSync,
     lstatSync,
     mkdirSync,
+    mkdtempSync,
     readdirSync,
     rmSync,
     statSync,
+    writeFileSync,
 } from "node:fs"
+import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url))
 const rootDir = join(__dirname, "..")
+const DRAWIO_RELEASE_TAG = process.env.DRAWIO_RELEASE_TAG || "v29.5.2"
+const DRAWIO_DOWNLOAD_URL =
+    process.env.DRAWIO_DOWNLOAD_URL ||
+    `https://github.com/jgraph/drawio/releases/download/${DRAWIO_RELEASE_TAG}/draw.war`
 const SKIPPED_STANDALONE_SEGMENTS = new Set([
     "electron-standalone",
     "release",
@@ -106,6 +114,125 @@ function copyDereferenced(src, dst) {
     }
 }
 
+function toPowerShellLiteral(value) {
+    return `'${value.replaceAll("'", "''")}'`
+}
+
+async function downloadFile(url, destinationPath) {
+    console.log(`Downloading draw.io bundle from ${url}...`)
+
+    if (process.platform === "win32") {
+        const command = `Invoke-WebRequest -Headers @{ 'User-Agent' = 'next-ai-draw-io-build' } -Uri ${toPowerShellLiteral(url)} -OutFile ${toPowerShellLiteral(destinationPath)}`
+        execFileSync("powershell", ["-NoProfile", "-Command", command], {
+            stdio: "inherit",
+        })
+        return
+    }
+
+    try {
+        execFileSync(
+            "curl",
+            [
+                "-L",
+                "-H",
+                "User-Agent: next-ai-draw-io-build",
+                "-o",
+                destinationPath,
+                url,
+            ],
+            { stdio: "inherit" },
+        )
+        return
+    } catch {
+        const response = await fetch(url, {
+            headers: {
+                "User-Agent": "next-ai-draw-io-build",
+            },
+        })
+
+        if (!response.ok) {
+            throw new Error(
+                `Failed to download draw.io bundle: ${response.status} ${response.statusText}`,
+            )
+        }
+
+        const buffer = Buffer.from(await response.arrayBuffer())
+        writeFileSync(destinationPath, buffer)
+    }
+}
+
+function extractArchive(archivePath, destinationPath) {
+    if (process.platform === "win32") {
+        const command = `Expand-Archive -LiteralPath ${toPowerShellLiteral(archivePath)} -DestinationPath ${toPowerShellLiteral(destinationPath)} -Force`
+        execFileSync("powershell", ["-NoProfile", "-Command", command], {
+            stdio: "inherit",
+        })
+        return
+    }
+
+    execFileSync("tar", ["-xf", archivePath, "-C", destinationPath], {
+        stdio: "inherit",
+    })
+}
+
+async function ensureBundledDrawio(targetPublicDir) {
+    if (process.env.NEXT_PUBLIC_DRAWIO_BASE_URL) {
+        console.log(
+            "NEXT_PUBLIC_DRAWIO_BASE_URL is set. Skipping bundled draw.io download.",
+        )
+        return
+    }
+
+    const targetDrawioDir = join(targetPublicDir, "drawio")
+    const targetDrawioIndex = join(targetDrawioDir, "index.html")
+    const cacheDir = join(tmpdir(), "next-ai-drawio-cache")
+    const archivePath = join(cacheDir, `drawio-${DRAWIO_RELEASE_TAG}.zip`)
+
+    if (existsSync(targetDrawioIndex)) {
+        console.log("Using draw.io bundle from public/drawio.")
+        return
+    }
+
+    const tempExtractDir = mkdtempSync(join(tmpdir(), "next-ai-drawio-"))
+
+    try {
+        mkdirSync(cacheDir, { recursive: true })
+
+        if (!existsSync(archivePath)) {
+            await downloadFile(DRAWIO_DOWNLOAD_URL, archivePath)
+        } else {
+            console.log(`Using cached draw.io bundle from ${archivePath}`)
+        }
+
+        const extractDir = join(tempExtractDir, "extract")
+        mkdirSync(extractDir, { recursive: true })
+        extractArchive(archivePath, extractDir)
+
+        mkdirSync(targetDrawioDir, { recursive: true })
+
+        for (const entry of readdirSync(extractDir)) {
+            if (entry === "META-INF" || entry === "WEB-INF") {
+                continue
+            }
+
+            copyDereferenced(
+                join(extractDir, entry),
+                join(targetDrawioDir, entry),
+            )
+        }
+
+        console.log(`Bundled draw.io web app into ${targetDrawioDir}`)
+    } catch (error) {
+        rmSync(targetDrawioDir, { recursive: true, force: true })
+        console.warn(
+            "Warning: Failed to prepare bundled draw.io. Electron will fall back to the configured remote draw.io URL.",
+        )
+        console.warn(error)
+    } finally {
+        rmSync(tempExtractDir, { recursive: true, force: true })
+    }
+}
+
 const standaloneDir = join(rootDir, ".next", "standalone")
 const staticDir = join(rootDir, ".next", "static")
 const targetDir = join(rootDir, "electron-standalone")
@@ -137,5 +264,7 @@ const targetPublicDir = join(targetDir, "public")
 if (existsSync(publicDir)) {
     copyDereferenced(publicDir, targetPublicDir)
 }
+
+await ensureBundledDrawio(targetPublicDir)
 
 console.log("Done! Files prepared in electron-standalone/")

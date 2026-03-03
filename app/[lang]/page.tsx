@@ -17,6 +17,8 @@ export default function Home() {
         useDiagram()
     const router = useRouter()
     const pathname = usePathname()
+    const configuredDrawioBaseUrl =
+        process.env.NEXT_PUBLIC_DRAWIO_BASE_URL || "https://embed.diagrams.net"
     // Extract current language from pathname (e.g., "/zh/about" → "zh")
     const currentLang = (pathname.split("/")[1] || i18n.defaultLocale) as Locale
     const [isMobile, setIsMobile] = useState(false)
@@ -26,58 +28,96 @@ export default function Home() {
     const [isLoaded, setIsLoaded] = useState(false)
     const [isDrawioReady, setIsDrawioReady] = useState(false)
     const [isElectron, setIsElectron] = useState(false)
-    const [drawioBaseUrl, setDrawioBaseUrl] = useState(
-        process.env.NEXT_PUBLIC_DRAWIO_BASE_URL || "https://embed.diagrams.net",
-    )
+    const [usesBundledDrawio, setUsesBundledDrawio] = useState(false)
+    const [drawioBaseUrl, setDrawioBaseUrl] = useState(configuredDrawioBaseUrl)
 
     const chatPanelRef = useRef<ImperativePanelHandle>(null)
     const isMobileRef = useRef(false)
 
     // Load preferences from localStorage after mount
     useEffect(() => {
-        // Restore saved locale and redirect if needed
-        const savedLocale = localStorage.getItem("next-ai-draw-io-locale")
-        if (savedLocale && i18n.locales.includes(savedLocale as Locale)) {
-            const pathParts = pathname.split("/").filter(Boolean)
-            const currentLocale = pathParts[0]
-            if (currentLocale !== savedLocale) {
-                pathParts[0] = savedLocale
-                router.replace(`/${pathParts.join("/")}`)
-                return // Wait for redirect
+        let isCancelled = false
+
+        const initialize = async () => {
+            // Restore saved locale and redirect if needed
+            const savedLocale = localStorage.getItem("next-ai-draw-io-locale")
+            if (savedLocale && i18n.locales.includes(savedLocale as Locale)) {
+                const pathParts = pathname.split("/").filter(Boolean)
+                const currentLocale = pathParts[0]
+                if (currentLocale !== savedLocale) {
+                    pathParts[0] = savedLocale
+                    router.replace(`/${pathParts.join("/")}`)
+                    return // Wait for redirect
+                }
+            }
+
+            const savedUi = localStorage.getItem("drawio-theme")
+            if (savedUi === "min" || savedUi === "sketch") {
+                setDrawioUi(savedUi)
+            }
+
+            const savedDarkMode = localStorage.getItem(
+                "next-ai-draw-io-dark-mode",
+            )
+            if (savedDarkMode !== null) {
+                const isDark = savedDarkMode === "true"
+                setDarkMode(isDark)
+                document.documentElement.classList.toggle("dark", isDark)
+            } else {
+                const prefersDark = window.matchMedia(
+                    "(prefers-color-scheme: dark)",
+                ).matches
+                setDarkMode(prefersDark)
+                document.documentElement.classList.toggle("dark", prefersDark)
+            }
+
+            // Detect Electron and use bundled draw.io files for offline use
+            // Note: react-drawio uses `new URL(baseUrl)` so we need absolute URL
+            // Include /index.html because Next.js doesn't auto-serve index.html for directories
+            const electronDetected =
+                !process.env.NEXT_PUBLIC_DRAWIO_BASE_URL &&
+                !!(window as unknown as { electronAPI?: unknown }).electronAPI
+            if (electronDetected) {
+                setIsElectron(true)
+
+                const basePath = process.env.NEXT_PUBLIC_BASE_PATH || ""
+                const bundledDrawioUrl = `${window.location.origin}${basePath}/drawio/index.html`
+
+                try {
+                    const response = await fetch(bundledDrawioUrl, {
+                        method: "HEAD",
+                        cache: "no-store",
+                    })
+
+                    if (response.ok) {
+                        if (!isCancelled) {
+                            setDrawioBaseUrl(bundledDrawioUrl)
+                            setUsesBundledDrawio(true)
+                        }
+                    } else {
+                        console.warn(
+                            `[Home] Bundled draw.io was not found at ${bundledDrawioUrl} (HTTP ${response.status}), falling back to ${configuredDrawioBaseUrl}.`,
+                        )
+                    }
+                } catch (error) {
+                    console.warn(
+                        `[Home] Failed to probe bundled draw.io at ${bundledDrawioUrl}, falling back to ${configuredDrawioBaseUrl}.`,
+                        error,
+                    )
+                }
+            }
+
+            if (!isCancelled) {
+                setIsLoaded(true)
             }
         }
 
-        const savedUi = localStorage.getItem("drawio-theme")
-        if (savedUi === "min" || savedUi === "sketch") {
-            setDrawioUi(savedUi)
-        }
+        void initialize()
 
-        const savedDarkMode = localStorage.getItem("next-ai-draw-io-dark-mode")
-        if (savedDarkMode !== null) {
-            const isDark = savedDarkMode === "true"
-            setDarkMode(isDark)
-            document.documentElement.classList.toggle("dark", isDark)
-        } else {
-            const prefersDark = window.matchMedia(
-                "(prefers-color-scheme: dark)",
-            ).matches
-            setDarkMode(prefersDark)
-            document.documentElement.classList.toggle("dark", prefersDark)
+        return () => {
+            isCancelled = true
         }
-
-        // Detect Electron and use bundled draw.io files for offline use
-        // Note: react-drawio uses `new URL(baseUrl)` so we need absolute URL
-        // Include /index.html because Next.js doesn't auto-serve index.html for directories
-        const electronDetected =
-            !process.env.NEXT_PUBLIC_DRAWIO_BASE_URL &&
-            !!(window as unknown as { electronAPI?: unknown }).electronAPI
-        if (electronDetected) {
-            setIsElectron(true)
-            setDrawioBaseUrl(`${window.location.origin}/drawio/index.html`)
-        }
-
-        setIsLoaded(true)
-    }, [pathname, router])
+    }, [configuredDrawioBaseUrl, pathname, router])
 
     const handleDrawioLoad = useCallback(() => {
         setIsDrawioReady(true)
@@ -187,9 +227,10 @@ export default function Home() {
                                             dark: darkMode,
                                             lang: currentLang,
                                             // Enable offline mode in Electron to disable external service calls
-                                            ...(isElectron && {
-                                                offline: true,
-                                            }),
+                                            ...(isElectron &&
+                                                usesBundledDrawio && {
+                                                    offline: true,
+                                                }),
                                         }}
                                     />
                                 </div>
