@@ -83,6 +83,61 @@ module.exports = async (context) => {
         )
     }
 
+    // Copy Electron binary files for Windows
+    if (context.packager.platform.name === "win") {
+        const sourceElectronDir = path.join(
+            context.packager.projectDir,
+            "node_modules",
+            "electron",
+            "dist"
+        )
+        console.log(`[afterPack] Copying Electron binaries to ${appOutDir}`)
+
+        const filesToCopy = [
+            "electron.exe",
+            "chrome_100_percent.pak",
+            "chrome_200_percent.pak",
+            "d3dcompiler_47.dll",
+            "dxcompiler.dll",
+            "dxil.dll",
+            "ffmpeg.dll",
+            "icudtl.dat",
+            "libEGL.dll",
+            "libGLESv2.dll",
+            "resources.pak",
+            "snapshot_blob.bin",
+            "v8_context_snapshot.bin",
+            "vk_swiftshader_icd.json",
+        ]
+
+        for (const file of filesToCopy) {
+            const src = path.join(sourceElectronDir, file)
+            const dst = path.join(appOutDir, file)
+            if (existsSync(src)) {
+                copyFileSync(src, dst)
+                console.log(`[afterPack] Copied ${file}`)
+            } else {
+                console.warn(`[afterPack] Warning: ${file} not found at ${src}`)
+            }
+        }
+
+        // Copy locales folder
+        const sourceLocales = path.join(sourceElectronDir, "locales")
+        const targetLocales = path.join(appOutDir, "locales")
+        if (existsSync(sourceLocales)) {
+            copyDereferenced(sourceLocales, targetLocales)
+            console.log("[afterPack] Copied locales folder")
+        }
+
+        // Copy resources folder
+        const sourceResources = path.join(sourceElectronDir, "resources")
+        const targetResources = path.join(appOutDir, "resources")
+        if (existsSync(sourceResources)) {
+            copyDereferenced(sourceResources, targetResources)
+            console.log("[afterPack] Copied resources folder")
+        }
+    }
+
     // Ad-hoc sign macOS apps to fix signature issues with bundled draw.io files
     if (context.packager.platform.name === "mac") {
         const appPath = path.join(

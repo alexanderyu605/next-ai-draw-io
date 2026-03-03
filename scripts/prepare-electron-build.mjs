@@ -20,6 +20,54 @@ import { fileURLToPath } from "node:url"
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url))
 const rootDir = join(__dirname, "..")
+const SKIPPED_STANDALONE_SEGMENTS = new Set([
+    "electron-standalone",
+    "release",
+    "release-manual",
+    "release-prepackaged",
+])
+const RESERVED_WINDOWS_BASENAMES = new Set([
+    "con",
+    "prn",
+    "aux",
+    "nul",
+    "com1",
+    "com2",
+    "com3",
+    "com4",
+    "com5",
+    "com6",
+    "com7",
+    "com8",
+    "com9",
+    "lpt1",
+    "lpt2",
+    "lpt3",
+    "lpt4",
+    "lpt5",
+    "lpt6",
+    "lpt7",
+    "lpt8",
+    "lpt9",
+])
+
+function shouldSkipEntry(src) {
+    const normalized = src.replaceAll("\\", "/")
+    const segments = normalized.split("/")
+    const baseName = normalized.split("/").pop()?.split(".")[0]?.toLowerCase()
+
+    if (baseName && RESERVED_WINDOWS_BASENAMES.has(baseName)) {
+        console.warn(`Skipping reserved Windows path: ${src}`)
+        return true
+    }
+
+    if (segments.some((segment) => SKIPPED_STANDALONE_SEGMENTS.has(segment))) {
+        console.warn(`Skipping nested standalone path: ${src}`)
+        return true
+    }
+
+    return false
+}
 
 /**
  * Copy directory recursively, converting symlinks to regular files/directories.
@@ -27,6 +75,10 @@ const rootDir = join(__dirname, "..")
  * macOS codesign fails if bundle contains symlinks pointing outside the bundle.
  */
 function copyDereferenced(src, dst) {
+    if (shouldSkipEntry(src)) {
+        return
+    }
+
     const lstat = lstatSync(src)
 
     if (lstat.isSymbolicLink()) {

@@ -14,6 +14,19 @@ const nextConfig: NextConfig = {
     outputFileTracingIncludes: {
         "*": ["./instrumentation.ts"],
     },
+    // Exclude directories from file tracing to avoid duplicates in standalone build
+    outputFileTracingExcludes: {
+        "*": [
+            "**/electron/**",
+            "**/electron-standalone/**",
+            "**/dist-electron/**",
+            "**/.git/**",
+            "**/release/**",
+            "**/release-manual/**",
+            "**/release-prepackaged/**",
+            "**/.next/standalone/**",
+        ],
+    },
 }
 
 export default nextConfig

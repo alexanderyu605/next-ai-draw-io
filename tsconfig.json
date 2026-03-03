@@ -35,6 +35,9 @@
         "packages",
         "electron",
         "electron-standalone",
-        "dist-electron"
+        "dist-electron",
+        "release",
+        "release-manual",
+        "release-prepackaged"
     ]
 }
